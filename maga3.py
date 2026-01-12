@@ -1,142 +1,136 @@
 import streamlit as st
+from supabase import create_client, Client
 import pandas as pd
-from datetime import datetime
 
-st.set_page_config(page_title="Magazyn Neon PRO", layout="wide")
+# --- KONFIGURACJA POŁĄCZENIA ---
+# Pobierz te dane z ustawień Supabase (Settings -> API)
+SUPABASE_URL = https://bhvyvyowqofvngpjitzq.supabase.co
+SUPABASE_KEY = sb_publishable_4YjSj8q8TiQg_9O1hFSbZg_cDoTNJhf
 
-# --- CUSTOM CSS (Stylizacja Neonowa) ---
+@st.cache_resource
+def init_connection():
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Inicjalizacja klienta
+supabase = init_connection()
+
+# --- USTAWIENIA STRONY ---
+st.set_page_config(page_title="CyberMagazyn 2026", layout="centered")
+
+# --- NEONOWY CSS (Zielony + Błękitny + Białe Nazwy) ---
 st.markdown("""
     <style>
-    /* Tło i główne kolory */
-    .stApp {
-        background-color: #0E1117;
-        color: #00f2ff;
+    /* Główny kolor tła i błękitne teksty */
+    .stApp { background-color: #0E1117; color: #00f2ff; }
+    
+    /* Neonowe zielone nagłówki */
+    h1, h2, h3 { 
+        color: #39FF14 !important; 
+        text-shadow: 0 0 12px #39FF14; 
+        font-family: 'Courier New', monospace;
     }
-    /* Nagłówki */
-    h1, h2, h3 {
-        color: #39FF14 !important;
-        text-shadow: 0 0 10px #39FF14;
+    
+    /* BIAŁE, JASNE NAZWY PRODUKTÓW */
+    .product-title {
+        color: #FFFFFF !important; 
+        font-size: 1.5rem;
+        font-weight: bold;
+        text-shadow: 0 0 5px #ffffff;
+        margin-bottom: 0px;
     }
-    /* Karty i kontenery */
-    [data-testid="stMetric"] {
+
+    /* Stylizacja kart produktów */
+    .product-box {
+        border-left: 4px solid #39FF14;
+        padding-left: 15px;
+        margin-bottom: 25px;
         background-color: #161b22;
-        border: 1px solid #00f2ff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 0 5px #00f2ff;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        border-radius: 0 10px 10px 0;
     }
-    /* Przyciski */
+
+    /* Przycisk usuwania (Czerwony Neon) */
     .stButton>button {
-        background-color: #0E1117;
-        color: #39FF14;
-        border: 2px solid #39FF14;
-        border-radius: 5px;
+        background-color: transparent;
+        color: #ff3131;
+        border: 2px solid #ff3131;
         transition: 0.3s;
     }
     .stButton>button:hover {
-        background-color: #39FF14;
-        color: #0E1117;
-        box-shadow: 0 0 15px #39FF14;
-    }
-    /* Inputy */
-    input {
-        background-color: #161b22 !important;
-        color: #00f2ff !important;
-        border: 1px solid #00f2ff !important;
+        background-color: #ff3131;
+        color: white;
+        box-shadow: 0 0 20px #ff3131;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- INICJALIZACJA SESJI ---
-if "magazyn" not in st.session_state:
-    st.session_state.magazyn = []
+st.title("⚡ CYBER-WAREHOUSE PRO")
 
-# --- TABS ---
-tab_mag, tab_dodaj, tab_finanse = st.tabs(["📋 MAGAZYN", "➕ DOSTAWA", "💰 RACHUNKOWOŚĆ"])
+# --- ZAKŁADKI ---
+tab_mag, tab_fin = st.tabs(["📋 MAGAZYN", "💰 RACHUNKOWOŚĆ"])
 
-# --- TAB: MAGAZYN ---
+# --- TAB 1: MAGAZYN ---
 with tab_mag:
-    st.header("⚡ Stan Systemu")
+    st.header("➕ Dodaj Towar")
+    with st.form("new_item", clear_on_submit=True):
+        name = st.text_input("Nazwa towaru")
+        c1, c2, c3 = st.columns(3)
+        q = c1.number_input("Ilość", min_value=1, step=1)
+        p = c2.number_input("Cena Netto (zł)", min_value=0.0, step=0.01)
+        v = c3.selectbox("VAT %", [23, 8, 5, 0])
+        
+        if st.form_submit_button("DODAJ DO BAZY"):
+            if name:
+                supabase.table("magazyn").insert({"nazwa": name, "ilosc": q, "cena": p, "vat": v}).execute()
+                st.success(f"Pomyślnie dodano: {name}")
+                st.rerun()
+
+    st.header("📋 Stan Zasobów")
     
-    if not st.session_state.magazyn:
-        st.info("System pusty. Oczekiwanie na dane...")
+    # Pobieranie produktów z Supabase
+    response = supabase.table("magazyn").select("*").order("id", desc=True).execute()
+    produkty = response.data
+
+    if not produkty:
+        st.info("Magazyn jest obecnie pusty.")
     else:
-        search = st.text_input("Szukaj w bazie (Neon Search)...")
-        
-        for i, t in enumerate(st.session_state.magazyn):
-            if search.lower() in t['nazwa'].lower():
-                with st.container(border=True):
-                    c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-                    c1.markdown(f"### {t['nazwa']}")
-                    c1.caption(f"Kategoria: {t['kategoria']}")
-                    c2.metric("Ilość", t['ilosc'])
-                    c3.metric("Wartość Netto", f"{t['ilosc']*t['cena']:.2f} zł")
-                    if c4.button("USUŃ", key=f"del_{i}"):
-                        st.session_state.magazyn.pop(i)
-                        st.rerun()
+        for item in produkty:
+            # Kontener stylizowany na kartę
+            st.markdown(f"""
+                <div class="product-box">
+                    <div class="product-title">{item['nazwa']}</div>
+                    <span style="color: #00f2ff;">Ilość: {item['ilosc']} | Cena: {item['cena']:.2f} zł | VAT: {item['vat']}%</span>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # Przycisk usuwania pod kartą
+            if st.button(f"USUŃ: {item['nazwa']}", key=f"del_{item['id']}"):
+                supabase.table("magazyn").delete().eq("id", item['id']).execute()
+                st.rerun()
 
-# --- TAB: DODAWANIE ---
-with tab_dodaj:
-    st.header("📥 Wprowadź Nowy Zasób")
-    with st.form("nowy_towar"):
-        col1, col2 = st.columns(2)
-        nazwa = col1.text_input("Nazwa")
-        kat = col2.selectbox("Kategoria", ["Hardware", "Software", "Energia", "Inne"])
-        
-        col3, col4, col5 = st.columns(3)
-        ilosc = col3.number_input("Ilość", min_value=1)
-        cena = col4.number_input("Cena zakupu Netto", min_value=0.0)
-        vat = col5.selectbox("Stawka VAT", [23, 8, 5, 0])
-        
-        marza = st.slider("Marża sprzedaży (%)", 0, 200, 30)
-        
-        if st.form_submit_button("ZAINICJUJ TRANSFER"):
-            st.session_state.magazyn.append({
-                "nazwa": nazwa,
-                "ilosc": ilosc,
-                "cena": cena,
-                "kategoria": kat,
-                "vat": vat,
-                "marza": marza
-            })
-            st.success("Dane przesłane pomyślnie.")
-            st.rerun()
-
-# --- TAB: RACHUNKOWOŚĆ I PODATKI ---
-with tab_finanse:
-    st.header("📊 Finanse i Opodatkowanie")
+# --- TAB 2: RACHUNKOWOŚĆ ---
+with tab_fin:
+    st.header("📊 Rozliczenia i Podatki")
     
-    if not st.session_state.magazyn:
-        st.warning("Brak danych do analizy finansowej.")
-    else:
-        # Obliczenia
-        wartosc_netto = sum(t['ilosc'] * t['cena'] for t in st.session_state.magazyn)
+    if produkty:
+        df = pd.DataFrame(produkty)
         
-        # Wyliczanie podatku VAT (dla każdego produktu osobno)
-        laczny_vat = sum((t['ilosc'] * t['cena']) * (t['vat']/100) for t in st.session_state.magazyn)
+        # Obliczenia finansowe
+        df['Suma Netto'] = df['ilosc'] * df['cena']
+        df['Kwota VAT'] = df['Suma Netto'] * (df['vat'] / 100)
+        df['Suma Brutto'] = df['Suma Netto'] + df['Kwota VAT']
         
-        # Estymacja przychodu przy zadanej marży
-        wartosc_sprzedazy_netto = sum((t['ilosc'] * t['cena']) * (1 + t['marza']/100) for t in st.session_state.magazyn)
-        potencjalny_zysk = wartosc_sprzedazy_netto - wartosc_netto
-
-        # Wyświetlanie statystyk
+        # Metryki
         m1, m2, m3 = st.columns(3)
-        m1.metric("Wartość Zakupu (Netto)", f"{wartosc_netto:.2f} zł")
-        m2.metric("Podatek VAT (do zapłaty)", f"{laczny_vat:.2f} zł", delta_color="inverse")
-        m3.metric("Wartość Brutto", f"{wartosc_netto + laczny_vat:.2f} zł")
+        m1.metric("Łącznie NETTO", f"{df['Suma Netto'].sum():,.2f} zł")
+        m2.metric("Łącznie VAT", f"{df['Kwota VAT'].sum():,.2f} zł")
+        m3.metric("Łącznie BRUTTO", f"{df['Suma Brutto'].sum():,.2f} zł")
         
         st.divider()
-        
-        st.subheader("📈 Analiza Zysku")
-        c1, c2 = st.columns(2)
-        c1.metric("Przewidywany Przychód (Netto)", f"{wartosc_sprzedazy_netto:.2f} zł")
-        c2.metric("Szacowany Zysk (na czysto)", f"{potencjalny_zysk:.2f} zł", delta=f"{marza}% marży")
-
-        # Tabela podatkowa
-        st.subheader("📝 Szczegółowe zestawienie")
-        df = pd.DataFrame(st.session_state.magazyn)
-        df['Wartość Netto'] = df['ilosc'] * df['cena']
-        df['Kwota VAT'] = df['Wartość Netto'] * (df['vat']/100)
-        df['Sugerowana Cena Sprzedaży (Szt)'] = df['cena'] * (1 + df['marza']/100)
-        
-        st.dataframe(df[['nazwa', 'ilosc', 'cena', 'vat', 'Kwota VAT', 'Sugerowana Cena Sprzedaży (Szt)']], use_container_width=True)
+        st.subheader("📝 Pełny arkusz podatkowy")
+        # Wyświetlamy tabelę (Pandas stylizuje ją automatycznie w Streamlit)
+        st.dataframe(df[['nazwa', 'ilosc', 'cena', 'vat', 'Suma Netto', 'Kwota VAT', 'Suma Brutto']], 
+                     use_container_width=True)
+    else:
+        st.warning("Brak danych do wygenerowania raportu.")
