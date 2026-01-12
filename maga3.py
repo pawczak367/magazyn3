@@ -1,53 +1,96 @@
 import streamlit as st
+from supabase import create_client, Client
 
-st.set_page_config(page_title="Prosty magazyn", layout="centered")
+# --- KONFIGURACJA POŁĄCZENIA ---
+# W wersji produkcyjnej użyj st.secrets["SUPABASE_URL"] itd.
+URL = "TWOJ_SUPABASE_URL"
+KEY = "TWOJ_SUPABASE_ANON_KEY"
 
-st.title("📦 Prosty magazyn (bez zapisu do plików)")
+@st.cache_resource
+def init_connection():
+    return create_client(URL, KEY)
 
-# Inicjalizacja magazynu w pamięci sesji
-if "magazyn" not in st.session_state:
-    st.session_state.magazyn = []
+supabase = init_connection()
 
-# --- Dodawanie towaru ---
-st.header("➕ Dodaj towar")
+st.set_page_config(page_title="Magazyn PRO", layout="wide")
 
-with st.form("dodaj_towar"):
-    nazwa = st.text_input("Nazwa towaru")
-    ilosc = st.number_input("Ilość", min_value=1, step=1)
-    cena = st.number_input("Cena za sztukę", min_value=0.0, step=0.01)
+# --- FUNKCJE CRUD ---
+def pobierz_dane():
+    query = supabase.table("magazyn").select("*").execute()
+    return query.data
 
-    submitted = st.form_submit_button("Dodaj")
+def dodaj_towar(nazwa, ilosc, cena, kategoria):
+    data = {"nazwa": nazwa, "ilosc": ilosc, "cena": cena, "kategoria": kategoria}
+    supabase.table("magazyn").insert(data).execute()
 
-    if submitted:
-        if nazwa.strip() == "":
-            st.warning("Podaj nazwę towaru.")
-        else:
-            st.session_state.magazyn.append({
-                "nazwa": nazwa,
-                "ilosc": ilosc,
-                "cena": cena
-            })
-            st.success(f"Dodano towar: {nazwa}")
+def usun_towar(id_towaru):
+    supabase.table("magazyn").delete().eq("id", id_towaru).execute()
 
-# --- Wyświetlanie magazynu ---
-st.header("📋 Stan magazynu")
+# --- INTERFEJS ---
+st.title("🚀 Zaawansowany System Magazynowy")
 
-if not st.session_state.magazyn:
-    st.info("Magazyn jest pusty.")
-else:
-    for i, towar in enumerate(st.session_state.magazyn):
-        col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+tab1, tab2, tab3 = st.tabs(["📋 Widok Magazynu", "➕ Dodaj Produkt", "📊 Statystyki"])
 
-        col1.write(f"**{towar['nazwa']}**")
-        col2.write(f"Ilość: {towar['ilosc']}")
-        col3.write(f"Cena: {towar['cena']} zł")
+# --- TAB 1: LISTA PRODUKTÓW ---
+with tab1:
+    st.header("Aktualny stan zapasów")
+    dane = pobierz_dane()
+    
+    if not dane:
+        st.info("Brak towarów w bazie.")
+    else:
+        # Filtr kategorii
+        kategorie = list(set([t['kategoria'] for t in dane if t['kategoria']]))
+        wybrana_kat = st.multiselect("Filtruj wg kategorii", options=kategorie)
+        
+        for towar in dane:
+            # Logika filtrowania
+            if wybrana_kat and towar['kategoria'] not in wybrana_kat:
+                continue
+                
+            with st.container(border=True):
+                c1, c2, c3, c4, c5 = st.columns([3, 2, 2, 2, 1])
+                c1.subheader(towar['nazwa'])
+                c2.metric("Ilość", towar['ilosc'])
+                c3.metric("Cena", f"{towar['cena']} zł")
+                c4.write(f"🏷️ {towar['kategoria']}")
+                
+                if c5.button("🗑️", key=f"del_{towar['id']}"):
+                    usun_towar(towar['id'])
+                    st.rerun()
 
-        if col4.button("❌", key=f"usun_{i}"):
-            st.session_state.magazyn.pop(i)
-            st.experimental_rerun()
+# --- TAB 2: FORMULARZ DODAWANIA ---
+with tab2:
+    st.header("Nowa dostawa")
+    with st.form("form_dodaj", clear_on_submit=True):
+        col_a, col_b = st.columns(2)
+        nazwa = col_a.text_input("Nazwa przedmiotu")
+        kat = col_b.selectbox("Kategoria", ["Elektronika", "Spożywcze", "Dom", "Inne"])
+        
+        col_c, col_d = st.columns(2)
+        ilosc = col_c.number_input("Ilość", min_value=0)
+        cena = col_d.number_input("Cena netto", min_value=0.0)
+        
+        if st.form_submit_button("Zatwierdź i wyślij do bazy"):
+            if nazwa:
+                dodaj_towar(nazwa, ilosc, cena, kat)
+                st.success(f"Zapisano {nazwa} w bazie danych!")
+                st.rerun()
+            else:
+                st.error("Nazwa jest wymagana!")
 
-# --- Wartość magazynu ---
-st.header("💰 Wartość magazynu")
-
-wartosc = sum(t["ilosc"] * t["cena"] for t in st.session_state.magazyn)
-st.write(f"**Łączna wartość magazynu:** {wartosc:.2f} zł")
+# --- TAB 3: ANALITYKA ---
+with tab3:
+    st.header("Podsumowanie finansowe")
+    if dane:
+        total_value = sum(t['ilosc'] * t['cena'] for t in dane)
+        total_items = sum(t['ilosc'] for t in dane)
+        
+        m1, m2 = st.columns(2)
+        m1.metric("Łączna wartość magazynu", f"{total_value:,.2f} zł")
+        m2.metric("Liczba wszystkich sztuk", total_items)
+        
+        # Prosty wykres
+        import pandas as pd
+        df = pd.DataFrame(dane)
+        st.bar_chart(df.set_index('nazwa')['ilosc'])
